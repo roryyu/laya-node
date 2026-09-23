@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "laya": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/absolute/path/to/laya-node/bin/laya-mcp.js",
+        "--models-dir",
+        "/absolute/path/to/laya-node/models"
+      ]
+    }
+  }
+}

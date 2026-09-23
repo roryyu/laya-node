@@ -1,0 +1,7 @@
+# 合并进 ~/.codex/config.toml 或受信任项目的 .codex/config.toml。
+# 将两个占位路径替换成真实绝对路径；不要覆盖已有配置。
+[mcp_servers.laya]
+command = "node"
+args = ["/absolute/path/to/laya-node/bin/laya-mcp.js", "--models-dir", "/absolute/path/to/laya-node/models"]
+startup_timeout_sec = 20
+tool_timeout_sec = 180

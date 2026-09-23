@@ -1,0 +1,57 @@
+{
+  "name": "laya-node",
+  "version": "0.1.0",
+  "description": "Laya 类型化决策推理 SDK：Node.js + Transformers.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./mcp": {
+      "types": "./src/mcp.d.ts",
+      "import": "./src/mcp.js"
+    },
+    "./mcp/http": {
+      "types": "./src/mcp-http.d.ts",
+      "import": "./src/mcp-http.js"
+    }
+  },
+  "bin": {
+    "laya-node": "./bin/laya.js",
+    "laya-node-mcp": "./bin/laya-mcp.js"
+  },
+  "files": [
+    "src",
+    "bin",
+    "tools/*.py",
+    "tools/*.js",
+    "tools/requirements.txt",
+    "examples",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test test/integration.test.js",
+    "test:mcp": "node --test test/mcp.test.js test/mcp-http.test.js",
+    "mcp": "node bin/laya-mcp.js",
+    "mcp:http": "node bin/laya-mcp.js --transport http",
+    "test:models": "node tools/verify_models.js",
+    "test:types": "npm exec --yes --package=typescript@5.9.3 -- tsc --noEmit --strict --module nodenext --target es2022 test/types.ts",
+    "example": "node examples/predict.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.6.5"
+  }
+}

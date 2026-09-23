@@ -1,0 +1,9 @@
+# 仅用于一次性导出和数值对照，Node.js 运行时不需要 Python。
+torch==2.8.0
+transformers==5.0.0
+laya==0.3.5
+safetensors==0.6.2
+huggingface-hub>=1.3,<2
+onnx==1.19.0
+onnxruntime==1.23.2
+numpy==2.3.3

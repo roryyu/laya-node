@@ -1,0 +1,5 @@
+# 先启动 npm run mcp:http；与 stdio 的同名配置二选一。
+[mcp_servers.laya]
+url = "http://127.0.0.1:7777/mcp"
+startup_timeout_sec = 20
+tool_timeout_sec = 180

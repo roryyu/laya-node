@@ -1,0 +1,15 @@
+laya-node
+
+本项目是 Laya 的独立 Node.js 改写，不是上游官方发行版。
+原项目：Laya，Convai Innovations / NandhaKishorM 及贡献者。
+来源：https://github.com/NandhaKishorM/laya
+参考版本：0.3.5，提交 573e5b62696ba441230cd6be71d593331b5d23af。
+许可：Apache License 2.0，完整条款见 LICENSE。
+
+改动：推理 SDK、问题构造、校准计算、语言路由、邮件清理、预设和
+shortlist 从 Python 迁移为 JavaScript；加入 Transformers.js ONNX 运行时、
+资源生命周期管理、CLI、类型声明及独立 Python 导出工具。
+导出工具展开了决策头的注意力计算以支持动态 ONNX 维度，
+并额外输出编码器 embedding；原始 Laya 模型用于数值对照。
+
+模型权重与第三方依赖保留各自许可证；本包不包含预训练权重。

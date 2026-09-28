@@ -4,8 +4,10 @@ import { load, DEFAULT_MODELS } from '../src/index.js';
 // 首次导出：.venv/bin/python tools/export_onnx.py --checkpoint english --output models/english
 // int8 量化：.venv/bin/python tools/quantize_onnx.py models/english
 // CoreML：.venv/bin/python tools/prepare_coreml.py models/english（无损改写，CPU 同样可用）
+// MLX（Apple Silicon 最快，~60ms）：先 .venv/bin/pip install mlx，权重自动从 HF 缓存/下载
 // 运行：node examples/predict.js [已导出模型目录]
 //   LAYA_DTYPE=q8 使用量化模型；LAYA_DEVICE=coreml 使用 CoreML EP（仅 macOS，且不与 q8 组合）
+//   LAYA_DEVICE=mlx 使用 MLX 后端（仅 macOS，LAYA_DTYPE=fp16 可选）
 //   LAYA_THREADS=8 指定 onnxruntime 算子内线程数；Apple Silicon 上设为 P-core 数（M2 Max 为 8）比默认快 ~20%
 const request = JSON.parse(await readFile(new URL('./request.json', import.meta.url), 'utf8'));
 const agent = await load(process.argv[2] ?? DEFAULT_MODELS.english, {

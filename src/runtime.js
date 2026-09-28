@@ -31,10 +31,14 @@ function validateConfig(config) {
 export async function loadRuntime(modelPath = DEFAULT_MODELS.english, options = {}) {
   if (typeof modelPath !== 'string' || !modelPath) throw new TypeError('模型路径不能为空');
   const device = options.device ?? 'cpu';
-  if (!['cpu', 'coreml'].includes(device)) throw new RangeError("device 仅支持 'cpu' 或 'coreml'");
+  if (!['cpu', 'coreml', 'mlx'].includes(device)) throw new RangeError("device 仅支持 'cpu'、'coreml' 或 'mlx'");
   if (device === 'coreml' && process.platform !== 'darwin') throw new RangeError('CoreML EP 仅在 macOS（onnxruntime-node 预编译包）上可用');
   const dtype = options.dtype ?? 'fp32';
-  if (!['fp32', 'q8', 'q4'].includes(dtype)) throw new RangeError("dtype 仅支持 'fp32'、'q8' 或 'q4'（量化需先运行 tools/quantize_onnx.py）");
+  if (device === 'mlx') {
+    if (!['fp32', 'fp16'].includes(dtype)) throw new RangeError("MLX device 仅支持 dtype 'fp32' 或 'fp16'（q8/q4 量化只适用于 ONNX CPU）");
+  } else if (!['fp32', 'q8', 'q4'].includes(dtype)) {
+    throw new RangeError("dtype 仅支持 'fp32'、'q8' 或 'q4'（量化需先运行 tools/quantize_onnx.py）");
+  }
   if (device === 'coreml' && dtype !== 'fp32') throw new RangeError("CoreML EP 仅验证过 fp32：MatMulNBits(q8/q4) 不被 CoreML 支持，请改用 device: 'cpu'");
   if (/^convaiinnovations\/laya(?:$|-|\/)/.test(modelPath)) throw new Error('上游仓库是 safetensors 格式，不能直接运行；请使用导出后的本地目录或自己的 ONNX Hub 仓库');
   let local = path.isAbsolute(modelPath) || modelPath.startsWith('.');
@@ -62,6 +66,29 @@ export async function loadRuntime(modelPath = DEFAULT_MODELS.english, options = 
   }
   const tokenizer = await AutoTokenizer.from_pretrained(source, common);
   specialTokens(tokenizer);
+  if (device === 'mlx') {
+    // MLX 后端：加载同一导出目录的 config/tokenizer，权重经 safetensors sidecar 推理
+    const { createMLXSidecar } = await import('./mlx.js');
+    const sidecar = await createMLXSidecar({ fp16: dtype === 'fp16', modelDir: options.mlxModelDir });
+    return {
+      tokenizer, config: structuredClone(meta.agent_config), metadata: meta, source,
+      async run(batch) {
+        const n = batch.input_ids.length, length = batch.input_ids[0].length, k = batch.marker_pos[0].length;
+        if (length > meta.max_position_embeddings) throw new RangeError('序列超过编码器最大位置数');
+        const result = await sidecar.run(batch);
+        const expected = { logits: [n, k], act_logits: [n, meta.n_act], embeddings: [n, meta.hidden_size] };
+        for (const name of OUTPUTS) {
+          const rows = result[name];
+          if (!Array.isArray(rows) || rows.length !== n || rows.some((r) => !Array.isArray(r) || r.length !== expected[name][1])) {
+            throw new Error(`MLX ${name} shape 不匹配`);
+          }
+          if (!rows.every((r) => r.every(Number.isFinite))) throw new Error(`MLX ${name} 含非有限数值`);
+        }
+        return result;
+      },
+      dispose: () => sidecar.dispose(),
+    };
+  }
   let model;
   try {
     const sessionOptions = { ...(options.sessionOptions ?? {}) };

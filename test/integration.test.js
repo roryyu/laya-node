@@ -74,3 +74,24 @@ test('真实 Transformers.js / ONNX：Python golden 对照', { skip: !available 
     } finally { await router.dispose(); }
   });
 });
+
+const mlxWeights = path.join(root, '.cache/huggingface/models--convaiinnovations--laya/snapshots/1c5edc17a7acd8701df6fc341c0d179f1c62c982/model.safetensors');
+let mlxAvailable = process.platform === 'darwin';
+for (const p of [path.join(root, '.venv/bin/python'), mlxWeights, path.join(root, 'models/english/golden.json')]) {
+  try { await access(p); } catch { mlxAvailable = false; }
+}
+test('MLX sidecar：golden 对照（fp32 Metal）', { skip: !mlxAvailable && '需要 macOS + .venv(mlx) + safetensors 权重' }, async (t) => {
+  const golden = JSON.parse(await readFile(path.join(root, 'models/english/golden.json'), 'utf8'));
+  const start = performance.now();
+  const agent = await load(path.join(root, 'models/english'), { device: 'mlx', localFilesOnly: true });
+  t.after(() => agent.dispose());
+  t.diagnostic(`MLX cold_load_ms=${(performance.now() - start).toFixed(1)}`);
+  for (const entry of golden.cases) {
+    await t.test(entry.name, async () => {
+      const raw = await agent.predictRaw(entry.state, entry.questions, entry.options);
+      assert.deepEqual(raw.batch, entry.inputs, 'token ids / markers / mask 必须与 Python 一致');
+      close(raw.output, entry.output, 'output', 1e-3, 1e-2);
+      if (entry.result) close(await agent.predict(entry.state, entry.questions), entry.result, 'result', 1e-3, 1e-2);
+    });
+  }
+});

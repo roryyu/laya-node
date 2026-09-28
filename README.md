@@ -2,12 +2,12 @@
 
 Laya 的独立 Node.js 类型化决策 SDK，基于 Transformers.js 加载完整 ONNX 模型，将文本或 JSON 状态转换为分类、等级评分、真假概率等结构化结果。
 
-本项目不是聊天文本生成器，也不是上游官方发行版。它将 Laya 的推理与辅助能力迁移到 JavaScript；Python 仅用于模型导出和数值对照，日常推理不依赖 Python 服务或远程 LLM API。
+本项目不是聊天文本生成器，也不是上游官方发行版。它将 Laya 的推理与辅助能力迁移到 JavaScript；Python 仅用于模型导出、数值对照和可选的 MLX 后端 sidecar（Apple Silicon），默认推理不依赖 Python 服务或远程 LLM API。
 
 ## 功能概览
 
 - **三类决策**：`choice` 标签选择、`score` 有序等级评分、`noul` 命题为真的概率；一次请求可包含多个问题。
-- **本地推理**：完整编码器、决策头和动作头在同一 ONNX 图中执行，当前支持 CPU FP32。
+- **本地推理**：完整编码器、决策头和动作头在同一 ONNX 图中执行；支持 CPU FP32、int8 量化、CoreML EP 与 Apple Silicon MLX 后端（见「推理加速」）。
 - **多模型路由**：在 `english`、`multilingual`、`typed-decisions` 之间选择，支持显式指定、语言检测、可选工作流匹配。
 - **候选筛选**：利用 embedding 与余弦相似度选出 Top-K，再执行 `choice` 决策。
 - **业务预设**：客服分流、邮件处理、提示词安全、内容审核、请求路由，以及邮件正文清理。
@@ -19,7 +19,7 @@ Laya 的独立 Node.js 类型化决策 SDK，基于 Transformers.js 加载完整
 
 - Node.js **>= 22**，使用 ESM `import`。
 - 推理依赖：`@huggingface/transformers@4.3.0`；MCP 适配依赖：`@modelcontextprotocol/sdk@1.30.0`、`zod@4.6.5`。SDK 主入口不导入 MCP 模块。
-- Python 及 [tools/requirements.txt](tools/requirements.txt) 中的依赖仅在导出或重新生成数值对照时需要。
+- Python 及 [tools/requirements.txt](tools/requirements.txt) 在导出、量化、CoreML 改写和重新生成数值对照时需要；MLX 后端还需额外 `.venv/bin/pip install mlx`。
 - 预训练权重不包含在 npm 发布包中；完整模型可能占用数 GB 内存，请预留磁盘和内存空间。
 
 以下命令均在 `laya-node` 项目根目录执行：
@@ -102,6 +102,60 @@ npm run example -- ./artifacts/tiny-english-v2
 
 该目录若已存在，应直接复用。**tiny 仅验证运行协议、动态图和数值一致性，不具备真实语义决策能力，也不能作为完整模型验收结果。**
 
+### 推理加速：q8 量化 / CoreML / MLX
+
+默认 CPU FP32 在 Apple Silicon（M2 Max）上热推理约 710ms。下列选项不改变问题定义与答案语义：
+
+| 路径 | 准备命令 | 加载配置 | 热推理实测* | 收益 / 代价 |
+| --- | --- | --- | --- | --- |
+| CPU 线程调优 | 无 | `sessionOptions: { intraOpNumThreads: 8 }` | ~552ms | 无损；设为 P-core 数约快 22% |
+| int8 量化（q8） | `tools/quantize_onnx.py` | `dtype: 'q8'` | 约慢 15% | 模型 -65%、加载 -61%、内存大降 |
+| CoreML EP | `tools/prepare_coreml.py` | `device: 'coreml'` | ~845ms | 本机型为负优化，先自测再启用 |
+| MLX 后端（推荐） | `.venv/bin/pip install mlx` | `device: 'mlx'` | **~58ms（约 12×）** | 数值与 CPU 一致；冷启动数秒，需 Python sidecar |
+
+\* 3 个问题 / 约 300 token 的示例请求热路径均值，绝对值因机器而异，建议用自己的负载复核。
+
+#### int8 量化（q8）
+
+```bash
+.venv/bin/python tools/quantize_onnx.py models/english
+# 产出 onnx/model_quantized.onnx：1608 MiB → 564 MiB，加载 1386ms → 537ms
+```
+
+int8 weight-only（MatMulNBits，块 128，激活保持 fp32），无需校准数据；golden 验收 logits 误差 <0.2、embedding cos >0.999，决策与 fp32 一致，代价是推理延迟约增加 15%。使用 `load(path, { dtype: 'q8' })`。`--mode q4` 与 `--mode dynamic` 在该模型上数值超差，仅作对照；若先跑过 CoreML 改写，量化产物同样兼容。
+
+#### CoreML EP
+
+```bash
+.venv/bin/python tools/prepare_coreml.py models/english   # 就地无损改写，幂等
+```
+
+ModernBERT 注意力的 4D 广播掩码会让 CoreML 运行时崩溃，脚本在每个注意力相加前插入 Shape+Expand 使输入同形：数值与原模型逐位一致，CPU 性能不变，并在 config 中标记 `coreml_patched`（未改写的模型会拒绝以 CoreML 加载）。使用 `load(path, { device: 'coreml' })`，仅 macOS、仅 fp32（量化模型不支持 CoreML）。注意：该模型会被切成约 273 个子图，M2 Max 实测 ~845ms 慢于 CPU，启用前先跑自己的基准。
+
+#### MLX 后端（Apple Silicon 最快）
+
+```bash
+.venv/bin/pip install mlx    # 复用现有 .venv
+```
+
+```js
+const agent = await load('./models/english', { device: 'mlx' });   // 默认 fp32，与 CPU 结果一致
+// 可选：{ device: 'mlx', dtype: 'fp16' }
+// 可选：{ device: 'mlx', mlxModelDir: '/absolute/path/to/safetensors 目录' }
+```
+
+首次使用自动下载上游 safetensors（约 840MB）到 `.cache/huggingface`；也可用 `mlxModelDir` 指定本地目录。加载时启动 [tools/mlx_runtime.py](tools/mlx_runtime.py) 常驻 sidecar（NDJSON stdio 协议），随 `agent.dispose()` 关闭；解释器默认取 `.venv/bin/python`，可用环境变量 `LAYA_MLX_PYTHON` 覆盖。fp32 对照 golden.json 七个样本 logits 偏差 ≤4e-5、embedding cos=1.0；fp16 logits ≤4.5e-3、cos ≥0.999998。冷启动需数秒（权重加载与 Metal 编译），适合常驻 SDK 或服务，不适合单次命令。
+
+示例脚本支持对应环境变量：
+
+```bash
+LAYA_DEVICE=mlx node examples/predict.js            # MLX fp32
+LAYA_DEVICE=mlx LAYA_DTYPE=fp16 node examples/predict.js
+LAYA_DTYPE=q8 node examples/predict.js              # 量化 ONNX
+LAYA_DEVICE=coreml node examples/predict.js         # CoreML（需先改写模型）
+LAYA_THREADS=8 node examples/predict.js             # ONNX 算子内线程数
+```
+
 ## SDK 快速开始
 
 下面的 ESM 示例使用已导出的中文模型。模型加载、推理和释放都需要 `await`：
@@ -175,7 +229,7 @@ try {
 | `agent.embed(texts, options)` | 提取编码器均值池化 embedding；支持 `maxLength`、`batchSize` |
 | `agent.dispose()` | 拒绝新推理，等待在途操作后释放模型；重复调用复用释放过程 |
 
-加载选项包括 `localFilesOnly`、`cacheDir`、`revision`、`progressCallback`、`sessionOptions` 和 `device: 'cpu'`。本地路径只读取本地文件；远程仓库必须是符合本项目协议的 ONNX 制品，不能直接传入上游 safetensors 仓库。
+加载选项包括 `localFilesOnly`、`cacheDir`、`revision`、`progressCallback`、`sessionOptions`、`device: 'cpu' | 'coreml' | 'mlx'` 和 `dtype: 'fp32' | 'q8' | 'q4' | 'fp16'`（`fp16` 仅 MLX，量化仅 ONNX，CoreML 需先改写模型，详见「推理加速」）；MLX 还可用 `mlxModelDir` 指定 safetensors 目录。本地路径只读取本地文件；远程仓库必须是符合本项目协议的 ONNX 制品，不能直接传入上游 safetensors 仓库。
 
 推理选项：
 
@@ -462,7 +516,7 @@ state + questions
   → 输入校验与 JSON 序列化
   → 每个问题构造一条序列：问题 + 候选 marker + 状态正文
   → 多问题 padding 成 batch
-  → Transformers.js / ONNX：编码器 + 类型嵌入 + 决策头 + 动作头
+  → Transformers.js / ONNX（或 MLX sidecar）：编码器 + 类型嵌入 + 决策头 + 动作头
   → 温度处理、softmax、结果格式化
   → answers + usage
 ```
@@ -471,7 +525,8 @@ state + questions
 | --- | --- |
 | `src/index.js` / `src/index.d.ts` | 公共导出与 TypeScript API |
 | `src/agent.js` | 推理编排、答案格式化、embedding、资源生命周期 |
-| `src/runtime.js` | 模型加载、配置与张量协议校验、ONNX 执行 |
+| `src/runtime.js` | 模型加载、配置与张量协议校验，CPU / CoreML / MLX 执行分发 |
+| `src/mlx.js` | MLX sidecar 进程管理：NDJSON stdio、就绪握手、请求队列与释放 |
 | `src/questions.js` / `src/sequence.js` | 问题校验、选项渲染、token 预算与 batch 构建 |
 | `src/router.js` / `src/lang.js` | checkpoint 路由、模型缓存与语言启发式 |
 | `src/shortlist.js` | embedding 候选筛选 |
@@ -480,7 +535,7 @@ state + questions
 | `bin/laya-mcp.js` / `src/mcp.js` / `src/mcp.d.ts` | 双传输 CLI、共用 MCP 工具、模型队列与类型声明 |
 | `src/mcp-http.js` / `src/mcp-http.d.ts` | Streamable HTTP 监听、安全校验与连接生命周期 |
 | `skills/laya-decision/` | Codex / Claude Code 共用决策 Skill |
-| `tools/` | Python 导出和 Node.js 数值验收 |
+| `tools/` | Python 导出、q8 量化、CoreML 改写、MLX 运行时与数值验收 |
 | `examples/` / `test/` | 用法示例与测试 |
 | `models/` / `artifacts/` / `.cache/` | 本地模型、验证产物和缓存，不随 npm 包发布 |
 
@@ -488,7 +543,7 @@ ONNX 输入为 `input_ids`、`attention_mask`、`marker_pos`、`marker_mask`、`
 
 ## 使用边界与许可
 
-- 当前实现限定 CPU FP32，不提供 CUDA、WebGPU、量化加载或浏览器运行支持。
+- 默认本地 CPU FP32；可选 int8 量化、CoreML EP 与 Apple Silicon MLX 后端（见「推理加速」）。不提供 CUDA、WebGPU 或浏览器运行支持；MLX 依赖本机 Python sidecar 进程。
 - checkpoint 温度会限幅到 `[0.5, 5]`；超界或无效时发出 `LAYA_TEMPERATURE_CLAMPED` 警告，受影响置信度不能视为已校准。
 - 这是推理 SDK，提供本机 stdio / Streamable HTTP MCP 适配，不包含模型训练、自动执行业务操作、公开网络服务或通用 Agent 工具执行循环。
 - 安全、审核、退款等高风险场景应结合业务规则、人工复核和真实数据评估，不能只依赖单次模型概率。

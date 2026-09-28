@@ -18,7 +18,8 @@ export interface Prediction<Q extends Questions = Questions> {
   routing?: RouteDecision;
 }
 export interface LoadOptions {
-  cacheDir?: string; revision?: string; localFilesOnly?: boolean; device?: 'cpu';
+  cacheDir?: string; revision?: string; localFilesOnly?: boolean; device?: 'cpu' | 'coreml';
+  dtype?: 'fp32' | 'q8' | 'q4';
   progressCallback?: (event: Record<string, unknown>) => void;
   sessionOptions?: Record<string, unknown>;
 }

@@ -30,7 +30,12 @@ function validateConfig(config) {
 
 export async function loadRuntime(modelPath = DEFAULT_MODELS.english, options = {}) {
   if (typeof modelPath !== 'string' || !modelPath) throw new TypeError('模型路径不能为空');
-  if (options.device != null && options.device !== 'cpu') throw new RangeError('当前已验证的运行设备仅支持 CPU FP32');
+  const device = options.device ?? 'cpu';
+  if (!['cpu', 'coreml'].includes(device)) throw new RangeError("device 仅支持 'cpu' 或 'coreml'");
+  if (device === 'coreml' && process.platform !== 'darwin') throw new RangeError('CoreML EP 仅在 macOS（onnxruntime-node 预编译包）上可用');
+  const dtype = options.dtype ?? 'fp32';
+  if (!['fp32', 'q8', 'q4'].includes(dtype)) throw new RangeError("dtype 仅支持 'fp32'、'q8' 或 'q4'（量化需先运行 tools/quantize_onnx.py）");
+  if (device === 'coreml' && dtype !== 'fp32') throw new RangeError("CoreML EP 仅验证过 fp32：MatMulNBits(q8/q4) 不被 CoreML 支持，请改用 device: 'cpu'");
   if (/^convaiinnovations\/laya(?:$|-|\/)/.test(modelPath)) throw new Error('上游仓库是 safetensors 格式，不能直接运行；请使用导出后的本地目录或自己的 ONNX Hub 仓库');
   let local = path.isAbsolute(modelPath) || modelPath.startsWith('.');
   if (!local) { try { await access(modelPath); local = true; } catch {} }
@@ -51,13 +56,23 @@ export async function loadRuntime(modelPath = DEFAULT_MODELS.english, options = 
   };
   const config = await AutoConfig.from_pretrained(source, common);
   const meta = validateConfig(config);
+  if (device === 'coreml' && meta.coreml_patched !== true) {
+    throw new Error('该模型未做 CoreML 兼容改写（注意力 4D 广播会让 CoreML EP 运行时崩溃）；'
+      + `请先运行 .venv/bin/python tools/prepare_coreml.py "${source}"`);
+  }
   const tokenizer = await AutoTokenizer.from_pretrained(source, common);
   specialTokens(tokenizer);
   let model;
   try {
+    const sessionOptions = { ...(options.sessionOptions ?? {}) };
+    if (device === 'coreml') {
+      // Transformers.js 对 coreml 只注册单个 EP，图中 int64/bool/Shape 等算子无人接管会直接失败；
+      // 显式追加 CPU 兜底，让 CoreML 只接管它支持的 float 子图。用户仍可通过 sessionOptions 覆盖。
+      sessionOptions.executionProviders ??= ['coreml', 'cpu'];
+    }
     model = await PreTrainedModel.from_pretrained(source, {
-      ...common, config, device: options.device ?? 'cpu', dtype: 'fp32',
-      session_options: options.sessionOptions ?? {},
+      ...common, config, device, dtype,
+      session_options: sessionOptions,
     });
     const session = model.sessions.model;
     if (!session || INPUTS.some((name) => !session.inputNames.includes(name)) ||

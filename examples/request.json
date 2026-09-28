@@ -1,19 +1,19 @@
 {
   "state": {
-    "subject": "Duplicate charge",
-    "body": "I was billed twice. Please refund the duplicate today."
+    "subject": "重复收费",
+    "body": "我被重复收费了两次。请今天退还重复的部分。"
   },
   "questions": {
     "department": {
       "type": "choice",
-      "instructions": "Which team should handle this request?",
-      "criteria": { "billing": "invoices, payments, refunds", "technical": "bugs and outages", "other": "everything else" }
+      "instructions": "应该由哪个团队处理这个请求？",
+      "criteria": { "billing": "发票、付款、退款", "technical": "故障和中断", "other": "其他所有问题" }
     },
     "urgency": {
       "type": "score",
-      "instructions": "How urgent is this request?",
-      "criteria": ["no time pressure", "soon", "blocking issue or deadline"]
+      "instructions": "这个请求有多紧急？",
+      "criteria": ["没有时间压力", "尽快", "阻塞问题或截止日期"]
     },
-    "refund": { "type": "noul", "instructions": "Does the customer request a refund?" }
+    "refund": { "type": "noul", "instructions": "客户要求退款吗？" }
   }
 }

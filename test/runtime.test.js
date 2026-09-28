@@ -18,7 +18,10 @@ test('缺失路径、原始仓库和不支持的设备明确拒绝', async () =>
   await assert.rejects(load(path.join(root, 'artifacts/nonexistent')), /先运行.*export_onnx/);
   await assert.rejects(load(path.join(root, 'artifacts/absent/multilingual')), /--checkpoint multilingual/);
   await assert.rejects(load('convaiinnovations/laya'), /safetensors/);
-  await assert.rejects(load(tiny, { device: 'cuda' }), /仅支持 CPU/);
+  await assert.rejects(load(tiny, { device: 'cuda' }), /device 仅支持/);
+  // macOS 上 tiny 制品未做 CoreML 改写会被拒绝；其他平台直接报平台不支持，两种错误都含 CoreML
+  await assert.rejects(load(tiny, { device: 'coreml' }), /CoreML/);
+  await assert.rejects(load(tiny, { device: 'coreml', dtype: 'q8' }), /CoreML|device 仅支持/);
 });
 test('损坏制品配置在初始化会话前拒绝', async (t) => {
   const directory = await temporary(t);

@@ -2,7 +2,7 @@
 
 Laya 的独立 Node.js 类型化决策 SDK，基于 Transformers.js 加载完整 ONNX 模型，将文本或 JSON 状态转换为分类、等级评分、真假概率等结构化结果。
 
-本项目不是聊天文本生成器，也不是上游官方发行版。它将 Laya 的推理与辅助能力迁移到 JavaScript；Python 仅用于模型导出、数值对照和可选的 MLX 后端 sidecar（Apple Silicon），默认推理不依赖 Python 服务或远程 LLM API。
+本项目不是聊天文本生成器，也不是上游官方发行版。它将 Laya 的推理与辅助能力迁移到 JavaScript；Python 仅用于模型导出、数值对照和可选的 MLX 后端 sidecar（Apple Silicon），默认推理不依赖 Python 服务或远程 LLM API。与上游的关系及不直接复用上游代码的原因见[「与上游 Laya 的关系」](#与上游-laya-的关系)。
 
 ## 功能概览
 
@@ -540,6 +540,24 @@ state + questions
 | `models/` / `artifacts/` / `.cache/` | 本地模型、验证产物和缓存，不随 npm 包发布 |
 
 ONNX 输入为 `input_ids`、`attention_mask`、`marker_pos`、`marker_mask`、`qtype`；输出为 `logits`、`act_logits`、`embeddings`。普通文本分类 ONNX 或仅编码器模型不能直接替代该完整图。
+
+## 与上游 Laya 的关系
+
+引入 MLX sidecar 后常见疑问：既然已经依赖 Python 进程，为什么不直接使用上游 [NandhaKishorM/laya](https://github.com/NandhaKishorM/laya)？因为两者定位不同——sidecar 只借用 Python 的数值计算（约 50MB 的 `mlx` 包，无 PyTorch），上游则把整个决策系统放在 Python/PyTorch 生态中：
+
+| 维度 | 本项目的 MLX sidecar | 上游 laya |
+| --- | --- | --- |
+| Python 依赖 | 仅 `mlx`（约 50MB，无 PyTorch） | PyTorch + transformers 完整科学栈（2–4GB） |
+| Python 代码范围 | [tools/mlx_runtime.py](tools/mlx_runtime.py) 约 260 行纯前向，私有 NDJSON 协议 | 训练、渲染、推理一体的研究代码 |
+| 序列构造 | JS 侧实现，`golden.json` 逐 token 锁定一致性 | 全在 Python 侧，JS 生态不可复用 |
+| MLX 加速 | 已实现（约 58ms） | 无 MLX 后端；同等速度仍需自行实现前向 |
+| 工程层 | 输入校验、路由、生命周期、MCP、CLI、类型与测试 | 需自行构建或跨语言桥接 |
+| API 稳定性 | golden 数值验收与测试锁定的私有协议 | 研究仓库，无 API 承诺 |
+
+- **上游省不掉这份工作**：上游没有 MLX 路径，切换过去后想要同样的推理速度，仍需手写 ModernBERT + 决策头的 MLX 前向，即 `mlx_runtime.py` 的实现一行都少不掉。
+- **依赖重量决定产品边界**：本项目默认路径零 Python 依赖（`npm install` 即用），MLX 是可选增强；上游强制完整科学栈。
+- **架构主权**：本项目由 JS 拥有全部输入构造（问题渲染、token 预算、截断、marker 位置），Python 只做纯函数矩阵乘，数值一致性因此可被 golden 样本逐 token 验收；换用上游会把序列构造交回 Python，Router / shortlist / MCP / CLI 全部退化为跨语言桥接。
+- **何时该用上游**：训练、微调、修改奖励函数或复现实验是上游的领域。纯推理部署场景，上游不提供本项目的任何工程能力。
 
 ## 使用边界与许可
 

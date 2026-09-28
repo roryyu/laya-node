@@ -41,6 +41,8 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:accuracy": "node --test test/accuracy.test.js",
+    "test:perf": "node --test test/perf.test.js",
     "test:integration": "node --test test/integration.test.js",
     "test:mcp": "node --test test/mcp.test.js test/mcp-http.test.js",
     "mcp": "node bin/laya-mcp.js",
